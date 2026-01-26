@@ -1,0 +1,30 @@
+services:
+  app:
+    build: ./app
+    container_name: resumer-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app
+      - ./generated_resumes:/app/generated_resumes
+      - ./resume_templates:/app/resume_templates
+      - ./app/logs:/app/logs
+    env_file:
+      - ./app/.env
+    depends_on:
+      - db
+
+  db:
+    image: postgres:13
+    container_name: resumer-db
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=resumer
+    ports:
+      - "5433:5432"
+
+volumes:
+  db_data:
