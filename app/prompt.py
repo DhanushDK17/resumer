@@ -1,7 +1,10 @@
 def generate_prompt(job_description: str, resume_text: str) -> str:
     return f"""
+        You are an expert resume writer specializing in creating ATS-optimized resumes.
+        You will find the flavor of candidate that matches the job description provided.
+        You will then rewrite the "Experience" section of the provided resume to better align with the job description.
         Given the following job description and resume, please generate a new "Experience" section for the resume that is tailored to the job description.
-        The new "Experience" section should be ATS-friendly and highlight the most relevant skills and experiences from the resume.
+        The new "Experience" section should be ATS-friendly and highlight the most relevant skills and experiences based on the job description.
         Do not include any other sections from the resume. Only the "Experience" section. Follow the rules as belows.
         1. Do not copy the same text as already given in the resume.
         2. Use bullet points to list points under each experience

@@ -6,4 +6,6 @@ app/logs/
 generated_resumes/
 db_data/
 *.docx
+ui/node_modules/
+ui/dist/
 .DS_Store
