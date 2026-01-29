@@ -1,19 +1,28 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Optional
 from bs4 import BeautifulSoup
 from database import create_resumes_table, insert_resume
 from engine import generate_with_gemini
 from resume import replace_section
 
 import docx
+from io import BytesIO
 import logging
 import requests
 
 
 app = FastAPI()
 
-class Job(BaseModel):
-    url: str
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://192.168.1.67:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Resume(BaseModel):
     file_path: str
@@ -56,8 +65,7 @@ def scrape_job_description(url: str) -> str:
         logging.error(f"Error scraping job description: {e}")
         return ""
 
-def read_docx(file_path):
-    doc = docx.Document(file_path)
+def extract_docx_text(doc):
     full_text = []
     for para in doc.paragraphs:
         full_text.append(para.text)
@@ -80,20 +88,25 @@ def sanitize_filename(url: str) -> str:
 def on_startup():
     create_resumes_table()
 
-@app.post("/generate-resume/", response_model=Resume)
-async def generate_resume(job: Job):
+def build_resume(job_url: str, template_bytes: Optional[bytes]):
     # 1. Scrape job description from job.url
-    job_description = scrape_job_description(job.url)
+    job_description = scrape_job_description(job_url)
     if not job_description:
-        return {"error": "Could not scrape job description"}
+        return None, "Could not scrape job description"
 
     # 2. Load the source resume template
     try:
-        source_resume_path = "/app/resume_templates/source_resume.docx"
-        resume_text = read_docx(source_resume_path)
-        doc = docx.Document(source_resume_path)
+        if template_bytes:
+            doc = docx.Document(BytesIO(template_bytes))
+            resume_text = extract_docx_text(doc)
+        else:
+            source_resume_path = "/app/resume_templates/source_resume.docx"
+            doc = docx.Document(source_resume_path)
+            resume_text = extract_docx_text(doc)
     except FileNotFoundError:
-        return {"error": "Source resume not found"}
+        return None, "Source resume not found"
+    except Exception:
+        return None, "Invalid or unreadable resume template"
 
     # 3. Use Gemini to generate ATS-beating experience and skills
     new_experience = generate_with_gemini(job_description, resume_text)
@@ -102,12 +115,40 @@ async def generate_resume(job: Job):
     replace_section(doc, "WORK EXPERIENCE", new_experience)
 
     # 5. Save the new resume
-    file_path = f"generated_resumes/resume_for_{sanitize_filename(job.url)}.docx"
+    file_name = f"resume_for_{sanitize_filename(job_url)}.docx"
+    file_path = f"generated_resumes/{file_name}"
     doc.save(file_path)
 
     # 6. Store information in the database
-    insert_resume(job.url, file_path)
+    insert_resume(job_url, file_path)
+    return file_path, None
+
+
+@app.post("/generate-resume/", response_model=Resume)
+async def generate_resume(url: str = Form(...), template: Optional[UploadFile] = File(default=None)):
+    template_bytes = await template.read() if template else None
+    file_path, error = build_resume(url, template_bytes)
+    if error:
+        return {"error": error}
+    if not file_path:
+        return {"error": "Failed to generate resume"}
     return Resume(file_path=file_path)
+
+
+@app.post("/generate-resume-file/")
+async def generate_resume_file(url: str = Form(...), template: Optional[UploadFile] = File(default=None)):
+    template_bytes = await template.read() if template else None
+    file_path, error = build_resume(url, template_bytes)
+    if error:
+        return {"error": error}
+    if not file_path:
+        return {"error": "Failed to generate resume"}
+    filename = file_path.split("/")[-1]
+    return FileResponse(
+        path=file_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=filename,
+    )
 
 @app.get("/")
 async def root():
